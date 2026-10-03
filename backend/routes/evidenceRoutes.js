@@ -10,8 +10,9 @@ const {
     accessEvidence,
     verifyEvidence,
     addForensicReport,
+    getForensicReport,
     submitEvidenceToCourt
-} = require("../controllers/evidenceController");
+} = require("../controllers/evidenceController");   
 
 const {
     authenticateToken
@@ -70,6 +71,18 @@ router.get(
     "/:evidenceId/verify",
     authenticateToken,
     verifyEvidence
+);
+
+router.post(
+    "/:evidenceId/report",
+    authenticateToken,
+    addForensicReport
+);
+
+router.get(
+    "/:evidenceId/report",
+    authenticateToken,
+    getForensicReport
 );
 
 module.exports = router;

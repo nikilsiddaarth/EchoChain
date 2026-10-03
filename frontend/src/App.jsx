@@ -2,6 +2,7 @@ import { useState } from "react";
 import Cases from "./pages/Cases";
 import EchoChain from "./pages/EchoChain";
 import Evidence from "./pages/Evidence";
+import VerifyEvidence from "./pages/VerifyEvidence";
 import "./App.css";
 import {
     loginUser,
@@ -65,6 +66,10 @@ function App() {
 
         if (currentPage === "echo") {
             return <EchoChain />;
+        }
+
+        if (currentPage === "verify") {
+            return <VerifyEvidence />;
         }
 
         return (
@@ -641,7 +646,12 @@ function App() {
     Echo Chain
 </div>
 
-                    <div className="nav-item">
+                    <div
+                        className={`nav-item ${
+                            currentPage === "verify" ? "active" : ""
+                        }`}
+                        onClick={() => navigateTo("verify")}
+                    >
                         <span>✓</span>
                         Verify Evidence
                     </div>

@@ -630,6 +630,69 @@ async function addForensicReport(req, res) {
     }
 }
 
+async function getForensicReport(req, res) {
+    try {
+        const { evidenceId } = req.params;
+
+        if (!ObjectId.isValid(evidenceId)) {
+            return res.status(400).json({
+                message: "Invalid evidence ID"
+            });
+        }
+
+        const evidenceCollection =
+            req.app.locals.db.collection("evidence");
+
+        const reports =
+            req.app.locals.db.collection("forensicReports");
+
+        const evidence = await evidenceCollection.findOne({
+            _id: new ObjectId(evidenceId)
+        });
+
+        if (!evidence) {
+            return res.status(404).json({
+                message: "Evidence not found"
+            });
+        }
+
+        console.log("LOOKING FOR EVIDENCE ID:", evidenceId);
+
+const allReports = await reports.find({}).toArray();
+
+console.log("FORENSIC REPORTS IN DATABASE:");
+console.log(allReports);
+
+        const report = await reports.findOne({
+            $or: [
+        {
+            evidenceId: new ObjectId(evidenceId)
+        },
+        {
+            evidenceId: evidenceId
+        }
+                ]
+        });
+         
+
+        if (!report) {
+            return res.status(404).json({
+                message: "No forensic report found"
+            });
+        }
+
+        res.json({
+            report
+        });
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            message: "Failed to retrieve forensic report"
+        });
+    }
+}
+
 async function submitEvidenceToCourt(req, res) {
     try {
         const { evidenceId } = req.params;
@@ -834,5 +897,6 @@ module.exports = {
     accessEvidence,
     verifyEvidence,
     addForensicReport,
+    getForensicReport,
     submitEvidenceToCourt
 };

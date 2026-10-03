@@ -19,6 +19,11 @@ function Evidence() {
     const [selectedCase, setSelectedCase] = useState("");
     const [selectedFile, setSelectedFile] = useState(null);
 
+    const [showReportViewer, setShowReportViewer] = useState(false);
+    const [viewReport, setViewReport] = useState(null);
+    const [reportLoading, setReportLoading] = useState(false);
+    const [reportError, setReportError] = useState("");
+
     const [showGrantModal, setShowGrantModal] = useState(false);
     const [grantEvidence, setGrantEvidence] = useState(null);
     const [grantUserId, setGrantUserId] = useState("");
@@ -235,57 +240,58 @@ function Evidence() {
         }
     }
 
-    function closeModal() {
-        if (uploading) {
-            return;
-        }
+    async function handleViewReport(item) {
+        setReportLoading(true);
+        setReportError("");
+        setViewReport(null);
+        setShowReportViewer(true);
 
-        setShowModal(false);
-        setSelectedCase("");
-        setSelectedFile(null);
-    }
-
-    async function handleGrantAccess() {
-    try {
-        const token = localStorage.getItem("echoChainToken");
-
-        const response = await fetch(
-            `http://localhost:5000/api/evidence/${grantEvidence._id}/grant-access`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    userId: grantUserId,
-                    permission: "VIEW"
-                })
-            }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            setGrantMessage(data.message || "Failed to grant access");
-            return;
-        }
-
-        setGrantMessage("Evidence access granted successfully");
-        setGrantUserId("");
-    } catch {
-        setGrantMessage("Failed to grant evidence access");
-    }
-
-}
-
-    async function handleSubmitReport() {
         try {
             const token =
                 localStorage.getItem("echoChainToken");
 
             const response = await fetch(
-                `http://localhost:5000/api/evidence/${reportEvidence._id}/report`,
+                `http://localhost:5000/api/evidence/${item._id}/report`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.message ||
+                        "Failed to load forensic report"
+                );
+            }
+
+            setViewReport(data.report);
+            } catch (error) {
+                setReportError(error.message);
+            } finally {
+                setReportLoading(false);
+            }
+        }
+
+        function closeModal() {
+            if (uploading) {
+                return;
+            }
+
+            setShowModal(false);
+            setSelectedCase("");
+            setSelectedFile(null);
+        }
+
+        async function handleGrantAccess() {
+        try {
+            const token = localStorage.getItem("echoChainToken");
+
+            const response = await fetch(
+                `http://localhost:5000/api/evidence/${grantEvidence._id}/grant-access`,
                 {
                     method: "POST",
                     headers: {
@@ -293,9 +299,8 @@ function Evidence() {
                         Authorization: `Bearer ${token}`
                     },
                     body: JSON.stringify({
-                        reportTitle,
-                        findings,
-                        conclusion
+                        userId: grantUserId,
+                        permission: "VIEW"
                     })
                 }
             );
@@ -303,23 +308,93 @@ function Evidence() {
             const data = await response.json();
 
             if (!response.ok) {
+                setGrantMessage(data.message || "Failed to grant access");
+                return;
+            }
+
+            setGrantMessage("Evidence access granted successfully");
+            setGrantUserId("");
+        } catch {
+            setGrantMessage("Failed to grant evidence access");
+        }
+
+    }
+
+        async function handleSubmitReport() {
+            try {
+                const token =
+                    localStorage.getItem("echoChainToken");
+
+                const response = await fetch(
+                    `http://localhost:5000/api/evidence/${reportEvidence._id}/report`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            reportTitle,
+                            findings,
+                            conclusion
+                        })
+                    }
+                );
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    setReportMessage(
+                        data.message ||
+                            "Failed to add forensic report"
+                    );
+                    return;
+                }
+
                 setReportMessage(
+                    "Forensic report added successfully"
+                );
+
+                setReportTitle("");
+                setFindings("");
+                setConclusion("");
+            } catch {
+                setReportMessage(
+                    "Failed to add forensic report"
+                );
+            }
+        }
+
+        async function handleSubmitCourt(item) {
+        try {
+            const token =
+                localStorage.getItem("echoChainToken");
+
+            const response = await fetch(
+                `http://localhost:5000/api/evidence/${item._id}/submit`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                setError(
                     data.message ||
-                        "Failed to add forensic report"
+                        "Failed to submit evidence to court"
                 );
                 return;
             }
 
-            setReportMessage(
-                "Forensic report added successfully"
-            );
-
-            setReportTitle("");
-            setFindings("");
-            setConclusion("");
+            setError("");
+            alert("Evidence submitted to court successfully");
         } catch {
-            setReportMessage(
-                "Failed to add forensic report"
+            setError(
+                "Failed to submit evidence to court"
             );
         }
     }
@@ -469,6 +544,16 @@ function Evidence() {
                                         </button>
                                     )}
 
+                                    {user?.role === "Lawyer" && (
+                                        <button
+                                            onClick={() =>
+                                                handleSubmitCourt(item)
+                                            }
+                                        >
+                                            Submit to Court
+                                        </button>
+                                    )}
+
                                     {user?.role === "Forensic Expert" && (
                                         <button
                                             onClick={() => {
@@ -478,6 +563,16 @@ function Evidence() {
                                             }}
                                         >
                                             Add Report
+                                        </button>
+                                    )}
+
+                                    {user?.role === "Judge" && (
+                                        <button
+                                            onClick={() =>
+                                                handleViewReport(item)
+                                            }
+                                        >
+                                            View Forensic Report
                                         </button>
                                     )}
                                 </div>
@@ -848,6 +943,91 @@ function Evidence() {
                                 Add Report
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {showReportViewer && (
+                <div
+                    className="modal-overlay"
+                    onClick={() => setShowReportViewer(false)}
+                >
+                    <div
+                        className="case-modal report-modal"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className="modal-header">
+                            <div>
+                                <span className="eyebrow">
+                                    FORENSIC ANALYSIS
+                                </span>
+
+                                <h2>Forensic Report</h2>
+
+                                <p>
+                                    Official forensic examination recorded for this evidence.
+                                </p>
+                            </div>
+
+                            <button
+                                className="modal-close"
+                                onClick={() => setShowReportViewer(false)}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        {reportLoading && (
+                            <div className="loading-state">
+                                Loading forensic report...
+                            </div>
+                        )}
+
+                        {reportError && (
+                            <div className="page-error">
+                                {reportError}
+                            </div>
+                        )}
+
+                        {!reportLoading && !reportError && viewReport && (
+                            <div>
+                                <div className="modal-input-group">
+                                    <label>REPORT TITLE</label>
+
+                                    <div className="report-display">
+                                        {viewReport.reportTitle}
+                                    </div>
+                                </div>
+
+                                <div className="modal-input-group">
+                                    <label>FINDINGS</label>
+
+                                    <div className="report-display report-text">
+                                        {viewReport.findings}
+                                    </div>
+                                </div>
+
+                                <div className="modal-input-group">
+                                    <label>CONCLUSION</label>
+
+                                    <div className="report-display report-text">
+                                        {viewReport.conclusion}
+                                    </div>
+                                </div>
+
+                                <div className="modal-input-group">
+                                    <label>REPORT RECORDED</label>
+
+                                    <div className="report-display">
+                                        {viewReport.createdAt
+                                            ? new Date(
+                                                viewReport.createdAt
+                                            ).toLocaleString()
+                                            : "Recorded"}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
