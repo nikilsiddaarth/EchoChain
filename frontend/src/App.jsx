@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Cases from "./pages/Cases";
 import EchoChain from "./pages/EchoChain";
 import Evidence from "./pages/Evidence";
@@ -9,15 +9,67 @@ import {
     getStoredUser,
     logoutUser
 } from "./services/authService";
+import CaseDetails from "./pages/CaseDetails";
+import EvidenceDetails from "./pages/EvidenceDetails";
+import ForensicReport from "./pages/ForensicReport";
+
+
 
 function App() {
     const [user, setUser] = useState(getStoredUser());
     const [currentPage, setCurrentPage] = useState("dashboard");
+    const [selectedCaseId, setSelectedCaseId] =
+    useState(null);
+
+    const [selectedEvidenceId, setSelectedEvidenceId] =
+        useState(null);
+
+    const [selectedEvidence, setSelectedEvidence] =
+        useState(null);
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
+    
+    const [walletAddress, setWalletAddress] = useState("");
+    const [walletLoading, setWalletLoading] = useState(false);
+    const [walletError, setWalletError] = useState("");
+
+    
+    useEffect(() => {
+        if (!window.ethereum) return;
+
+        async function checkWallet() {
+            try {
+                const accounts = await window.ethereum.request({
+                    method: "eth_accounts"
+                });
+
+                setWalletAddress(accounts.length > 0 ? accounts[0] : "");
+            } catch (error) {
+                console.error("Unable to check wallet connection:", error);
+            }
+        }
+
+        checkWallet();
+
+        function handleAccountsChanged(accounts) {
+            setWalletAddress(accounts?.[0] || "");
+            setWalletError("");
+        }
+
+        window.ethereum.on("accountsChanged", handleAccountsChanged);
+
+        return () => {
+            window.ethereum.removeListener(
+                "accountsChanged",
+                handleAccountsChanged
+            );
+        };
+    }, []);
+
+
 
     async function handleLogin(event) {
         event.preventDefault();
@@ -37,6 +89,37 @@ function App() {
         }
     }
 
+    
+    async function connectWallet() {
+        setWalletError("");
+
+        if (!window.ethereum) {
+            setWalletError("MetaMask is not installed. Please install the MetaMask browser extension.");
+            return;
+        }
+
+        setWalletLoading(true);
+
+        try {
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+
+            if (accounts.length > 0) {
+                setWalletAddress(accounts[0]);
+            }
+        } catch (error) {
+            setWalletError(
+                error.code === 4001
+                    ? "Wallet connection was rejected."
+                    : "Unable to connect to MetaMask."
+            );
+        } finally {
+            setWalletLoading(false);
+        }
+    }
+
+
     function handleLogout() {
         logoutUser();
 
@@ -50,6 +133,21 @@ function App() {
         setCurrentPage(page);
     }
 
+    function openCase(caseId) {
+    setSelectedCaseId(caseId);
+    setCurrentPage("case-details");
+    }
+
+    function openEvidence(evidenceId) {
+        setSelectedEvidenceId(evidenceId);
+        setCurrentPage("evidence-details");
+    }
+
+    function openReport(evidence) {
+        setSelectedEvidence(evidence);
+        setCurrentPage("forensic-report");
+    }
+
     function renderPage() {
 
         if (user?.role === "Judge" && currentPage === "dashboard") {
@@ -57,11 +155,58 @@ function App() {
         }
         
         if (currentPage === "cases") {
-            return <Cases />;
+            return (
+                <Cases
+                    onOpenCase={openCase}
+                />
+            );
+        }
+
+        if (currentPage === "case-details") {
+            return (
+                <CaseDetails
+                    caseId={selectedCaseId}
+                    onBack={() =>
+                        navigateTo("cases")
+                    }
+                    onOpenEvidence={openEvidence}
+                />
+            );
         }
 
         if (currentPage === "evidence") {
-            return <Evidence />;
+            return (
+                <Evidence
+                    onOpenEvidence={openEvidence}
+                    onOpenReport={openReport}
+                />
+            );
+        }
+
+        if (currentPage === "evidence-details") {
+            return (
+                <EvidenceDetails
+                    evidenceId={selectedEvidenceId}
+                    onBack={() =>
+                        navigateTo("evidence")
+                    }
+                    onVerify={() =>
+                        navigateTo("verify")
+                    }
+                    onOpenReport={openReport}
+                />
+            );
+        }
+
+        if (currentPage === "forensic-report") {
+            return (
+                <ForensicReport
+                    evidence={selectedEvidence}
+                    onBack={() =>
+                        navigateTo("evidence-details")
+                    }
+                />
+            );
         }
 
         if (currentPage === "echo") {
@@ -656,6 +801,27 @@ function App() {
                         Verify Evidence
                     </div>
                 </nav>
+
+                
+                <div className="wallet-section">
+                    <button
+                        type="button"
+                        className="wallet-button"
+                        onClick={connectWallet}
+                        disabled={walletLoading}
+                    >
+                        {walletLoading
+                            ? "Connecting..."
+                            : walletAddress
+                                ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+                                : "Connect MetaMask"}
+                    </button>
+
+                    {walletError && (
+                        <p className="wallet-error">{walletError}</p>
+                    )}
+                </div>
+
 
                 <div className="sidebar-bottom">
                     <div className="network-status">

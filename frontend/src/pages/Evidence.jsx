@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { getStoredUser } from "../services/authService";
 
-function Evidence() {
+    function Evidence({
+        onOpenEvidence,
+        onOpenReport
+    }) {
     const user = getStoredUser();
     const [evidence, setEvidence] = useState([]);
     const [cases, setCases] = useState([]);
@@ -167,39 +170,182 @@ function Evidence() {
         }
     }
 
-    async function viewEvidence(item) {
-        try {
-            const token =
-                localStorage.getItem("echoChainToken");
+    
+    function getEvidenceMimeType(fileName, responseType = "") {
+        const extension = fileName?.split(".").pop()?.toLowerCase();
 
-            const response = await fetch(
-                `http://localhost:5000/api/evidence/${item._id}/access`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
+        const mimeTypes = {
+            pdf: "application/pdf",
+            png: "image/png",
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            gif: "image/gif",
+            webp: "image/webp",
+            bmp: "image/bmp",
+            svg: "image/svg+xml",
+            mp4: "video/mp4",
+            webm: "video/webm",
+            mp3: "audio/mpeg",
+            wav: "audio/wav",
+            txt: "text/plain",
+            csv: "text/csv",
+            json: "application/json",
+            xml: "application/xml"
+        };
+
+        const detectedType = mimeTypes[extension];
+
+        // Prefer the file extension when the server returns a generic type.
+        if (
+            detectedType &&
+            (!responseType ||
+                responseType.includes("application/octet-stream"))
+        ) {
+            return detectedType;
+        }
+
+        return responseType.split(";")[0].trim() ||
+            detectedType ||
+            "application/octet-stream";
+    }
+
+    async function fetchEvidenceFile(item) {
+        const token = localStorage.getItem("echoChainToken");
+
+        if (!token) {
+            throw new Error("Your session has expired. Please log in again.");
+        }
+
+        const response = await fetch(
+            `http://localhost:5000/api/evidence/${item._id}/access`,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`
                 }
-            );
+            }
+        );
 
-            if (!response.ok) {
+        if (!response.ok) {
+            let message = "Unable to access evidence.";
+
+            try {
                 const data = await response.json();
-
-                throw new Error(
-                    data.message ||
-                        "Unable to access evidence"
-                );
+                message = data.message || message;
+            } catch {
+                // Keep the fallback message if the response is not JSON.
             }
 
-            const blob = await response.blob();
+            throw new Error(message);
+        }
 
-            const url =
-                window.URL.createObjectURL(blob);
+        const originalBlob = await response.blob();
 
-            window.open(url, "_blank");
+        if (originalBlob.size === 0) {
+            throw new Error("The evidence file is empty.");
+        }
+
+        const mimeType = getEvidenceMimeType(
+            item.fileName,
+            response.headers.get("content-type") || originalBlob.type
+        );
+
+        return {
+            blob: new Blob([originalBlob], { type: mimeType }),
+            mimeType
+        };
+    }
+
+    async function viewEvidence(item) {
+        // Open synchronously so the browser is less likely to block the tab.
+        const previewTab = window.open("about:blank", "_blank");
+
+        if (!previewTab) {
+            setError("Preview was blocked. Allow pop-ups and try again.");
+            return;
+        }
+
+        previewTab.document.title = "Loading evidence";
+        previewTab.document.body.textContent = "Loading protected evidence...";
+
+        try {
+            setError("");
+
+            const { blob, mimeType } = await fetchEvidenceFile(item);
+
+            const canPreview =
+                mimeType === "application/pdf" ||
+                mimeType.startsWith("image/") ||
+                mimeType.startsWith("video/") ||
+                mimeType.startsWith("audio/") ||
+                mimeType === "text/plain" ||
+                mimeType === "text/csv";
+
+            if (!canPreview) {
+                previewTab.document.body.textContent =
+                    `Preview is not supported for ${item.fileName || "this file"}. ` +
+                    "Return to EchoChain and select Download Evidence.";
+
+                return;
+            }
+
+            const url = URL.createObjectURL(blob);
+            previewTab.document.open();
+            previewTab.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Evidence Preview</title>
+                    <style>
+                    body { margin: 0; font-family: Arial, sans-serif; }
+                    iframe, img, video { width: 100%; height: 100vh; border: 0; }
+                    </style>
+                </head>
+                <body>
+                    ${
+                        mimeType === "application/pdf"
+                            ? `<iframe src="${url}"></iframe>`
+                            : mimeType.startsWith("image/")
+                                ? `<img src="${url}" alt="Evidence preview" />`
+                                : mimeType.startsWith("video/")
+                                    ? `<video src="${url}" controls></video>`
+                                    : mimeType.startsWith("audio/")
+                                        ? `<audio src="${url}" controls></audio>`
+                                        : `<iframe src="${url}"></iframe>`
+                    }
+                </body>
+                </html>
+            `);
+            previewTab.document.close();
+
+            // Keep the URL alive long enough for the browser to load the file.
+            window.setTimeout(() => URL.revokeObjectURL(url), 60000);
         } catch (error) {
-            setError(error.message);
+            previewTab.close();
+            setError(error.message || "Unable to preview evidence.");
         }
     }
+
+    async function downloadEvidence(item) {
+        try {
+            setError("");
+
+            const { blob } = await fetchEvidenceFile(item);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = item.fileName || "evidence-file";
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (error) {
+            setError(error.message || "Unable to download evidence.");
+        }
+    }
+
 
     async function verifyEvidence(item) {
         setVerifying(true);
@@ -524,6 +670,23 @@ function Evidence() {
                                         View Evidence
                                     </button>
 
+                                    
+                                    <button
+                                        type="button"
+                                        onClick={() => downloadEvidence(item)}
+                                    >
+                                        Download Evidence
+                                    </button>
+
+
+                                    <button
+                                        onClick={() =>
+                                            onOpenEvidence(item._id)
+                                        }
+                                    >
+                                        Open Details →
+                                    </button>
+
                                     <button
                                         onClick={() =>
                                             verifyEvidence(item)
@@ -569,10 +732,10 @@ function Evidence() {
                                     {user?.role === "Judge" && (
                                         <button
                                             onClick={() =>
-                                                handleViewReport(item)
+                                                onOpenReport(item)
                                             }
                                         >
-                                            View Forensic Report
+                                            View Forensic Report →
                                         </button>
                                     )}
                                 </div>

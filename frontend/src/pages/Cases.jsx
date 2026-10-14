@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-function Cases() {
+function Cases({ onOpenCase }) {
     const [cases, setCases] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -10,58 +10,9 @@ function Cases() {
     const [description, setDescription] = useState("");
     const [creating, setCreating] = useState(false);
 
-    useEffect(() => {
-        let cancelled = false;
-
-        async function fetchCases() {
-            try {
-                const token =
-                    localStorage.getItem("echoChainToken");
-
-                const response = await fetch(
-                    "http://localhost:5000/api/cases",
-                    {
-                        headers: {
-                            Authorization: `Bearer ${token}`
-                        }
-                    }
-                );
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(
-                        data.message ||
-                            "Failed to load cases"
-                    );
-                }
-
-                if (!cancelled) {
-                    setCases(data.cases || []);
-                    setError("");
-                }
-            } catch (error) {
-                if (!cancelled) {
-                    setError(error.message);
-                }
-            } finally {
-                if (!cancelled) {
-                    setLoading(false);
-                }
-            }
-        }
-
-        fetchCases();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    async function refreshCases() {
+    async function loadCases() {
         try {
-            const token =
-                localStorage.getItem("echoChainToken");
+            const token = localStorage.getItem("echoChainToken");
 
             const response = await fetch(
                 "http://localhost:5000/api/cases",
@@ -76,16 +27,21 @@ function Cases() {
 
             if (!response.ok) {
                 throw new Error(
-                    data.message ||
-                        "Failed to load cases"
+                    data.message || "Failed to load cases"
                 );
             }
 
             setCases(data.cases || []);
         } catch (error) {
             setError(error.message);
+        } finally {
+            setLoading(false);
         }
     }
+
+    useEffect(() => {
+        loadCases();
+    }, []);
 
     async function handleCreateCase(event) {
         event.preventDefault();
@@ -116,8 +72,7 @@ function Cases() {
 
             if (!response.ok) {
                 throw new Error(
-                    data.message ||
-                        "Failed to create case"
+                    data.message || "Failed to create case"
                 );
             }
 
@@ -125,7 +80,7 @@ function Cases() {
             setDescription("");
             setShowModal(false);
 
-            await refreshCases();
+            await loadCases();
         } catch (error) {
             setError(error.message);
         } finally {
@@ -135,7 +90,7 @@ function Cases() {
 
     return (
         <div className="page-content">
-            <div className="page-heading">
+            <div className="page-header">
                 <div>
                     <span className="eyebrow">
                         CASE MANAGEMENT
@@ -144,55 +99,119 @@ function Cases() {
                     <h1>Cases</h1>
 
                     <p>
-                        Manage and review your secure legal
-                        cases.
+                        Manage secure legal cases and their
+                        associated evidence.
                     </p>
                 </div>
 
                 <button
-                    className="primary-action"
-                    onClick={() =>
-                        setShowModal(true)
-                    }
+                    className="case-create-button"
+                    onClick={() => setShowModal(true)}
                 >
-                    + New Case
+                    <span>+</span>
+                    New Case
                 </button>
+            </div>
+
+            <div className="case-overview">
+                <div className="overview-card">
+                    <div className="overview-icon">
+                        ▣
+                    </div>
+
+                    <div>
+                        <span>ACTIVE CASES</span>
+                        <strong>{cases.length}</strong>
+                    </div>
+                </div>
+
+                <div className="overview-card">
+                    <div className="overview-icon blue">
+                        ◈
+                    </div>
+
+                    <div>
+                        <span>SECURITY</span>
+                        <strong>PROTECTED</strong>
+                    </div>
+                </div>
+
+                <div className="overview-card">
+                    <div className="overview-icon green">
+                        ✓
+                    </div>
+
+                    <div>
+                        <span>ACCESS CONTROL</span>
+                        <strong>ENABLED</strong>
+                    </div>
+                </div>
             </div>
 
             {error && (
                 <div className="page-error">
-                    {error}
+                    <strong>Something went wrong</strong>
+                    <span>{error}</span>
                 </div>
             )}
 
             {loading && (
-                <div className="loading-state">
-                    Loading secure cases...
+                <div className="cases-loading">
+                    <div className="loading-spinner"></div>
+                    <span>Loading secure cases...</span>
                 </div>
             )}
 
             {!loading &&
                 !error &&
                 cases.length === 0 && (
-                    <div className="empty-state">
+                    <div className="cases-empty">
                         <div className="empty-icon">
                             ▣
                         </div>
 
-                        <h2>No cases found</h2>
+                        <h2>No cases yet</h2>
 
                         <p>
                             Create your first case to begin
                             managing evidence securely.
                         </p>
+
+                        <button
+                            className="case-create-button"
+                            onClick={() =>
+                                setShowModal(true)
+                            }
+                        >
+                            + Create First Case
+                        </button>
                     </div>
                 )}
 
-            {!loading &&
-                cases.length > 0 && (
+            {!loading && cases.length > 0 && (
+                <section className="cases-section">
+                    <div className="section-heading">
+                        <div>
+                            <span className="eyebrow">
+                                YOUR CASES
+                            </span>
+
+                            <h2>
+                                Active legal matters
+                            </h2>
+                        </div>
+
+                        <span className="case-count">
+                            {cases.length} case
+                            {cases.length !== 1
+                                ? "s"
+                                : ""}
+                        </span>
+                    </div>
+
                     <div className="cases-grid">
                         {cases.map((caseItem) => (
-                            <div
+                            <article
                                 className="case-card"
                                 key={caseItem._id}
                             >
@@ -201,13 +220,14 @@ function Cases() {
                                         ▣
                                     </div>
 
-                                    <span className="badge">
+                                    <span className="active-status">
+                                        <span></span>
                                         ACTIVE
                                     </span>
                                 </div>
 
                                 <span className="case-number">
-                                    CASE
+                                    CASE RECORD
                                 </span>
 
                                 <h2>
@@ -218,8 +238,10 @@ function Cases() {
                                     {caseItem.description}
                                 </p>
 
+                                <div className="case-card-divider"></div>
+
                                 <div className="case-card-footer">
-                                    <div>
+                                    <div className="case-id-block">
                                         <span>
                                             CASE ID
                                         </span>
@@ -229,14 +251,21 @@ function Cases() {
                                         </strong>
                                     </div>
 
-                                    <button className="view-case">
-                                        View Case →
+                                    <button
+                                        className="view-case"
+                                        onClick={() =>
+                                            onOpenCase(caseItem._id)
+                                        }
+                                    >
+                                        Open
+                                        <span>→</span>
                                     </button>
                                 </div>
-                            </div>
+                            </article>
                         ))}
                     </div>
-                )}
+                </section>
+            )}
 
             {showModal && (
                 <div
@@ -302,11 +331,11 @@ function Cases() {
 
                             <div className="modal-input-group">
                                 <label>
-                                    Description
+                                    Case description
                                 </label>
 
                                 <textarea
-                                    placeholder="Brief description of the case..."
+                                    placeholder="Enter a short description of the case..."
                                     value={description}
                                     onChange={(event) =>
                                         setDescription(
@@ -316,6 +345,22 @@ function Cases() {
                                     rows="5"
                                     required
                                 />
+                            </div>
+
+                            <div className="secure-notice">
+                                <span>◆</span>
+
+                                <div>
+                                    <strong>
+                                        Secure case record
+                                    </strong>
+
+                                    <p>
+                                        Case information is
+                                        protected by Echo Chain
+                                        access controls.
+                                    </p>
+                                </div>
                             </div>
 
                             <div className="modal-actions">
