@@ -360,6 +360,7 @@ import { getStoredUser } from "../services/authService";
             const response = await fetch(
                 `http://localhost:5000/api/evidence/${item._id}/verify`,
                 {
+                    cache: "no-store",
                     headers: {
                         Authorization: `Bearer ${token}`
                     }
@@ -1241,32 +1242,40 @@ import { getStoredUser } from "../services/authService";
                         ) : verification ? (
                             <>
                                 <div
-                                    className={
-                                        verification.status ===
-                                        "VERIFIED"
-                                            ? "verification-icon verified"
-                                            : "verification-icon failed"
-                                    }
+                                    
+                                    className={`verification-icon ${
+                                        verification.status === "VERIFIED"
+                                            ? "verified"
+                                            : verification.status === "HISTORY_UNAVAILABLE"
+                                            ? "history-unavailable"
+                                            : "failed"
+                                    }`}
+
                                 >
-                                    {verification.status ===
-                                    "VERIFIED"
-                                        ? "✓"
-                                        : "!"}
+                                    
+                                {verification.status === "VERIFIED"
+                                    ? "✓"
+                                    : verification.status === "HISTORY_UNAVAILABLE"
+                                    ? "ℹ"
+                                    : "!"}
+
                                 </div>
 
                                 <span className="eyebrow">
                                     INTEGRITY RESULT
                                 </span>
 
+                                
                                 <h2>
-                                    {verification.status ===
-                                    "VERIFIED"
+                                    {verification.status === "VERIFIED"
                                         ? "Evidence Verified"
-                                        : verification.status ===
-                                          "TAMPERING_DETECTED"
+                                        : verification.status === "TAMPERING_DETECTED"
                                         ? "Tampering Detected"
-                                        : "Verification Error"}
+                                        : verification.status === "HISTORY_UNAVAILABLE"
+                                        ? "Blockchain History Unavailable"
+                                        : "Verification Failed"}
                                 </h2>
+
 
                                 <p className="verification-message">
                                     {verification.message}
@@ -1300,19 +1309,25 @@ import { getStoredUser } from "../services/authService";
                                     </div>
                                 )}
 
+                                                                
                                 <div
-                                    className={
-                                        verification.status ===
-                                        "VERIFIED"
-                                            ? "verification-status verified-status"
-                                            : "verification-status failed-status"
-                                    }
+                                    className={`verification-status ${
+                                        verification.status === "VERIFIED"
+                                            ? "verified-status"
+                                            : verification.status === "HISTORY_UNAVAILABLE"
+                                            ? "history-unavailable-status"
+                                            : "failed-status"
+                                    }`}
                                 >
-                                    {verification.status ===
-                                    "VERIFIED"
+                                    {verification.status === "VERIFIED"
                                         ? "✓ INTEGRITY VERIFIED"
-                                        : "⚠ TAMPERING DETECTED"}
+                                        : verification.status === "TAMPERING_DETECTED"
+                                        ? "⚠ TAMPERING DETECTED"
+                                        : verification.status === "HISTORY_UNAVAILABLE"
+                                        ? "ℹ BLOCKCHAIN HISTORY UNAVAILABLE"
+                                        : "⚠ VERIFICATION FAILED"}
                                 </div>
+
                             </>
                         ) : null}
                     </div>

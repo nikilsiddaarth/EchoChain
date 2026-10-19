@@ -9,10 +9,11 @@ const {
     grantEvidenceAccess,
     accessEvidence,
     verifyEvidence,
+    downloadEvidence,
     addForensicReport,
     getForensicReport,
     submitEvidenceToCourt
-} = require("../controllers/evidenceController");   
+} = require("../controllers/evidenceController");
 
 const {
     authenticateToken
@@ -41,6 +42,12 @@ router.get(
     "/:evidenceId/access",
     authenticateToken,
     accessEvidence
+);
+
+router.get(
+    "/:evidenceId/download",
+    authenticateToken,
+    downloadEvidence
 );
 
 router.get(

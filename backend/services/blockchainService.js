@@ -35,6 +35,7 @@ const contract = new ethers.Contract(
     wallet
 );
 
+
 async function recordEcho(
     evidenceId,
     caseId,
@@ -52,11 +53,25 @@ async function recordEcho(
 
     const receipt = await transaction.wait();
 
+    const history = await contract.getEchoHistory(evidenceId);
+    const echo = history[history.length - 1];
+
     return {
         transactionHash: receipt.hash,
-        blockNumber: receipt.blockNumber
+        blockNumber: receipt.blockNumber,
+        echo: {
+            evidenceId: echo.evidenceId,
+            caseId: echo.caseId,
+            action: echo.action,
+            actor: echo.actor,
+            evidenceHash: echo.evidenceHash,
+            timestamp: echo.timestamp.toString(),
+            previousEcho: echo.previousEcho,
+            echoHash: echo.echoHash
+        }
     };
 }
+
 
 async function getEchoHistory(evidenceId) {
     return await contract.getEchoHistory(evidenceId);

@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { ObjectId } = require("mongodb");
+
 const {
     recordEcho,
     getEchoHistory: getEchoHistoryFromBlockchain
@@ -25,7 +26,6 @@ function encryptFile(inputPath, outputPath) {
     const output = fs.createWriteStream(outputPath);
 
     output.write(iv);
-
     input.pipe(cipher).pipe(output);
 
     return new Promise((resolve, reject) => {
@@ -33,6 +33,41 @@ function encryptFile(inputPath, outputPath) {
         output.on("error", reject);
         input.on("error", reject);
     });
+}
+
+async function recordAndSaveEcho(
+    req,
+    evidenceId,
+    caseId,
+    action,
+    actor,
+    evidenceHash
+) {
+    const blockchainRecord = await recordEcho(
+        evidenceId,
+        caseId,
+        action,
+        actor,
+        evidenceHash
+    );
+
+    const evidenceCollection =
+        req.app.locals.db.collection("evidence");
+
+    await evidenceCollection.updateOne(
+        {
+            _id: ObjectId.isValid(evidenceId)
+                ? new ObjectId(evidenceId)
+                : evidenceId
+        },
+        {
+            $push: {
+                echoHistory: blockchainRecord.echo
+            }
+        }
+    );
+
+    return blockchainRecord;
 }
 
 async function uploadEvidence(req, res) {
@@ -45,15 +80,7 @@ async function uploadEvidence(req, res) {
 
         const { caseId } = req.body;
 
-        if (!caseId) {
-            fs.unlinkSync(req.file.path);
-
-            return res.status(400).json({
-                message: "Case ID is required"
-            });
-        }
-
-        if (!ObjectId.isValid(caseId)) {
+        if (!ObjectId.isValid(caseId || "")) {
             fs.unlinkSync(req.file.path);
 
             return res.status(400).json({
@@ -94,9 +121,7 @@ async function uploadEvidence(req, res) {
             .digest("hex");
 
         const evidenceId = new ObjectId();
-
-        const encryptedFileName =
-            `${evidenceId.toString()}.enc`;
+        const encryptedFileName = `${evidenceId}.enc`;
 
         const encryptedPath = path.join(
             __dirname,
@@ -105,11 +130,7 @@ async function uploadEvidence(req, res) {
             encryptedFileName
         );
 
-        await encryptFile(
-            req.file.path,
-            encryptedPath
-        );
-
+        await encryptFile(req.file.path, encryptedPath);
         fs.unlinkSync(req.file.path);
 
         const evidence = {
@@ -129,81 +150,142 @@ async function uploadEvidence(req, res) {
 
         await evidenceCollection.insertOne(evidence);
 
+        try {
+            const blockchainRecord = await recordAndSaveEcho(
+                req,
+                evidenceId.toString(),
+                caseId,
+                "CREATED",
+                req.user.name,
+                hash
+            );
 
-        const blockchainRecord = await recordEcho(
-            evidenceId.toString(),
-            caseId,
-            "CREATED",
-            req.user.name,
-            hash
-        );
+            await evidenceCollection.updateOne(
+                { _id: evidenceId },
+                {
+                    $set: {
+                        transactionHash:
+                            blockchainRecord.transactionHash,
+                        blockNumber: blockchainRecord.blockNumber,
+                        blockchainRecordedAt: new Date(),
+                        blockchainStatus: "RECORDED"
+                    }
+                }
+            );
 
-        res.status(201).json({
-            message: "Evidence uploaded successfully",
-            evidence: {
-                id: evidenceId,
-                caseId: evidence.caseId,
-                fileName: evidence.fileName,
-                fileType: evidence.fileType,
-                hash: evidence.hash,
-                uploadedBy: evidence.uploadedBy,
-                uploadedAt: evidence.uploadedAt,
-                blockchain: blockchainRecord
-            }
-        });
+            return res.status(201).json({
+                message: "Evidence uploaded successfully",
+                evidence: {
+                    id: evidenceId,
+                    caseId: evidence.caseId,
+                    fileName: evidence.fileName,
+                    fileType: evidence.fileType,
+                    hash: evidence.hash,
+                    uploadedBy: evidence.uploadedBy,
+                    uploadedAt: evidence.uploadedAt,
+                    blockchain: blockchainRecord
+                }
+            });
+        } catch (error) {
+            console.error("Blockchain recording failed:", error);
+
+            await evidenceCollection.updateOne(
+                { _id: evidenceId },
+                {
+                    $set: {
+                        blockchainStatus: "FAILED"
+                    }
+                }
+            );
+
+            return res.status(503).json({
+                message: "Evidence stored, but blockchain recording failed",
+                evidenceId: evidenceId.toString(),
+                status: "BLOCKCHAIN_RECORDING_FAILED"
+            });
+        }
     } catch (error) {
-        console.error(error);
+        console.error("Evidence upload failed:", error);
 
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Evidence upload failed"
         });
     }
-}
-
-async function getEchoHistory(req, res) {
+}async function getEchoHistory(req, res) {
     try {
         const { evidenceId } = req.params;
 
-        if (!evidenceId) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
-                message: "Evidence ID is required"
+                message: "Invalid evidence ID"
             });
         }
 
-        const history = await getEchoHistoryFromBlockchain(
-            evidenceId
-        );
+        const evidenceCollection =
+            req.app.locals.db.collection("evidence");
 
-        const formattedHistory = history.map((echo) => ({
-            evidenceId: echo.evidenceId,
-            caseId: echo.caseId,
-            action: echo.action,
-            actor: echo.actor,
-            evidenceHash: echo.evidenceHash,
-            timestamp: echo.timestamp.toString(),
-            previousEcho: echo.previousEcho,
-            echoHash: echo.echoHash
-        }));
+        const evidence = await evidenceCollection.findOne({
+            _id: new ObjectId(evidenceId)
+        });
 
-        res.json({
-            message: "Echo history retrieved successfully",
+        if (!evidence) {
+            return res.status(404).json({
+                message: "Evidence not found"
+            });
+        }
+
+        try {
+            const history =
+                await getEchoHistoryFromBlockchain(evidenceId);
+
+            const blockchainHistory = history.map((echo) => ({
+                evidenceId: echo.evidenceId,
+                caseId: echo.caseId,
+                action: echo.action,
+                actor: echo.actor,
+                evidenceHash: echo.evidenceHash,
+                timestamp: echo.timestamp.toString(),
+                previousEcho: echo.previousEcho,
+                echoHash: echo.echoHash
+            }));
+
+            if (blockchainHistory.length > 0) {
+                return res.json({
+                    message: "Echo history retrieved from blockchain",
+                    evidenceId,
+                    source: "BLOCKCHAIN",
+                    history: blockchainHistory
+                });
+            }
+        } catch (error) {
+            console.error(
+                "Blockchain history unavailable:",
+                error.message
+            );
+        }
+
+        return res.json({
+            message: "Showing saved MongoDB history",
             evidenceId,
-            history: formattedHistory
+            source: "MONGODB_BACKUP",
+            history: Array.isArray(evidence.echoHistory)
+                ? evidence.echoHistory
+                : []
         });
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
-            message: "Failed to retrieve Echo history"
+        return res.status(500).json({
+            message: "Failed to retrieve Echo History"
         });
     }
 }
 
-async function grantEvidenceAccess(req, res) {  
+async function grantEvidenceAccess(req, res) {
     try {
         const { evidenceId } = req.params;
         const { userId, permission } = req.body;
@@ -214,21 +296,13 @@ async function grantEvidenceAccess(req, res) {
             });
         }
 
-        if (!evidenceId || !userId || !permission) {
+        if (
+            !ObjectId.isValid(evidenceId || "") ||
+            !ObjectId.isValid(userId || "") ||
+            permission !== "VIEW"
+        ) {
             return res.status(400).json({
-                message: "Evidence ID, user ID and permission are required"
-            });
-        }
-
-        if (permission !== "VIEW") {
-            return res.status(400).json({
-                message: "Invalid permission"
-            });
-        }
-
-        if (!ObjectId.isValid(evidenceId) || !ObjectId.isValid(userId)) {
-            return res.status(400).json({
-                message: "Invalid evidence ID or user ID"
+                message: "Invalid evidence ID, user ID or permission"
             });
         }
 
@@ -251,20 +325,13 @@ async function grantEvidenceAccess(req, res) {
             _id: evidence.caseId
         });
 
-        if (!caseData) {
-            return res.status(404).json({
-                message: "Associated case not found"
-            });
-        }
-
-        if (caseData.createdBy !== req.user.userId) {
+        if (!caseData || caseData.createdBy !== req.user.userId) {
             return res.status(403).json({
                 message: "You do not have access to this case"
             });
         }
 
-        const users =
-            req.app.locals.db.collection("users");
+        const users = req.app.locals.db.collection("users");
 
         const user = await users.findOne({
             _id: new ObjectId(userId)
@@ -282,7 +349,7 @@ async function grantEvidenceAccess(req, res) {
         ) {
             return res.status(400).json({
                 message: "Evidence access can only be granted to authorized case roles"
-                });
+            });
         }
 
         const permissions =
@@ -296,23 +363,20 @@ async function grantEvidenceAccess(req, res) {
 
         if (existingPermission) {
             return res.status(409).json({
-                message: "Evidence access already granted to this user"
+                message: "Evidence access already granted"
             });
         }
 
-
-
-        const accessRecord = {
+        await permissions.insertOne({
             evidenceId: new ObjectId(evidenceId),
             userId: new ObjectId(userId),
             grantedBy: req.user.userId,
-            permission,
+            permission: "VIEW",
             grantedAt: new Date()
-        };
+        });
 
-        await permissions.insertOne(accessRecord);
-
-        const blockchainRecord = await recordEcho(
+        const blockchainRecord = await recordAndSaveEcho(
+            req,
             evidenceId,
             evidence.caseId.toString(),
             "ACCESS_GRANTED",
@@ -320,23 +384,16 @@ async function grantEvidenceAccess(req, res) {
             evidence.hash
         );
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "Evidence access granted successfully",
-            access: {
-                evidenceId,
-                userId,
-                userName: user.name,
-                userRole: user.role,
-                permission,
-                grantedBy: req.user.name,
-                grantedAt: accessRecord.grantedAt
-            },
+            userId,
+            permission: "VIEW",
             blockchain: blockchainRecord
         });
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to grant evidence access"
         });
     }
@@ -346,7 +403,7 @@ async function accessEvidence(req, res) {
     try {
         const { evidenceId } = req.params;
 
-        if (!ObjectId.isValid(evidenceId)) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
                 message: "Invalid evidence ID"
             });
@@ -365,6 +422,9 @@ async function accessEvidence(req, res) {
             });
         }
 
+        const isOwner =
+            String(evidence.uploadedBy) === String(req.user.userId);
+
         const permissions =
             req.app.locals.db.collection("accessPermissions");
 
@@ -374,10 +434,7 @@ async function accessEvidence(req, res) {
             permission: "VIEW"
         });
 
-        const isOwner =
-            evidence.uploadedBy === req.user.userId;
-
-        if (!permission && !isOwner) {
+        if (!isOwner && !permission) {
             return res.status(403).json({
                 message: "You do not have permission to access this evidence"
             });
@@ -396,9 +453,7 @@ async function accessEvidence(req, res) {
             });
         }
 
-        const encryptedData =
-            fs.readFileSync(encryptedPath);
-
+        const encryptedData = fs.readFileSync(encryptedPath);
         const iv = encryptedData.subarray(0, 16);
         const encryptedContent = encryptedData.subarray(16);
 
@@ -413,30 +468,73 @@ async function accessEvidence(req, res) {
             decipher.final()
         ]);
 
-        await recordEcho(
-            evidence._id.toString(),
+        await recordAndSaveEcho(
+            req,
+            evidenceId,
             evidence.caseId.toString(),
             "ACCESSED",
             req.user.name,
             evidence.hash
         );
 
-        res.setHeader(
-            "Content-Type",
-            evidence.fileType
-        );
-
+        res.setHeader("Content-Type", evidence.fileType);
         res.setHeader(
             "Content-Disposition",
-            `inline; filename="${evidence.fileName}"`
+            `inline; filename="${path.basename(evidence.fileName)}"`
         );
 
-        res.send(decryptedContent);
+        return res.send(decryptedContent);
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to access evidence"
+        });
+    }
+}
+
+async function getEvidence(req, res) {
+    try {
+        const evidenceCollection =
+            req.app.locals.db.collection("evidence");
+
+        const permissionsCollection =
+            req.app.locals.db.collection("accessPermissions");
+
+        let evidence;
+
+        if (req.user.role === "Lawyer") {
+            evidence = await evidenceCollection.find({
+                uploadedBy: req.user.userId
+            })
+                .sort({ uploadedAt: -1 })
+                .toArray();
+        } else {
+            const permissions = await permissionsCollection.find({
+                userId: new ObjectId(req.user.userId),
+                permission: "VIEW"
+            }).toArray();
+
+            const evidenceIds = permissions.map(
+                (item) => item.evidenceId
+            );
+
+            evidence = await evidenceCollection.find({
+                _id: { $in: evidenceIds }
+            })
+                .sort({ uploadedAt: -1 })
+                .toArray();
+        }
+
+        return res.json({
+            message: "Evidence retrieved successfully",
+            evidence
+        });
+    } catch (error) {
+        console.error(error);
+
+        return res.status(500).json({
+            message: "Failed to retrieve evidence"
         });
     }
 }
@@ -445,7 +543,7 @@ async function verifyEvidence(req, res) {
     try {
         const { evidenceId } = req.params;
 
-        if (!ObjectId.isValid(evidenceId)) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
                 message: "Invalid evidence ID"
             });
@@ -477,9 +575,7 @@ async function verifyEvidence(req, res) {
             });
         }
 
-        const encryptedData =
-            fs.readFileSync(encryptedPath);
-
+        const encryptedData = fs.readFileSync(encryptedPath);
         const iv = encryptedData.subarray(0, 16);
         const encryptedContent = encryptedData.subarray(16);
 
@@ -500,21 +596,38 @@ async function verifyEvidence(req, res) {
             .digest("hex");
 
         const history =
-                await getEchoHistoryFromBlockchain(evidenceId);
+            await getEchoHistoryFromBlockchain(evidenceId);
 
-        const blockchainHash =
-            history.length > 0
-                ? history[0].evidenceHash
-                : null;
+        if (!history || history.length === 0) {
+            return res.json({
+                message: "Blockchain history unavailable",
+                evidenceId,
+                currentHash,
+                status: "HISTORY_UNAVAILABLE"
+            });
+        }
+
+        const blockchainHash = history[0].evidenceHash;
 
         const verified =
-            blockchainHash &&
-            currentHash === blockchainHash;
+            currentHash.toLowerCase() ===
+            String(blockchainHash).toLowerCase();
 
-        res.json({
+        if (verified) {
+            await recordAndSaveEcho(
+                req,
+                evidenceId,
+                evidence.caseId.toString(),
+                "VERIFIED",
+                req.user.name,
+                currentHash
+            );
+        }
+
+        return res.json({
             message: verified
                 ? "Evidence integrity verified"
-                : "Evidence tampering detected",
+                : "Evidence hash mismatch against blockchain",
             evidenceId,
             originalHash: evidence.hash,
             blockchainHash,
@@ -522,16 +635,147 @@ async function verifyEvidence(req, res) {
             status: verified
                 ? "VERIFIED"
                 : "TAMPERING_DETECTED"
-            });
+        });
     } catch (error) {
-        console.error(error);
+        console.error("Evidence verification failed:", error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Evidence verification failed"
         });
     }
 }
 
+async function downloadEvidence(req, res) {
+    let tempPath;
+
+    try {
+        const { evidenceId } = req.params;
+
+        if (!ObjectId.isValid(evidenceId || "")) {
+            return res.status(400).json({
+                message: "Invalid evidence ID"
+            });
+        }
+
+        const evidenceCollection =
+            req.app.locals.db.collection("evidence");
+
+        const evidence = await evidenceCollection.findOne({
+            _id: new ObjectId(evidenceId)
+        });
+
+        if (!evidence) {
+            return res.status(404).json({
+                message: "Evidence not found"
+            });
+        }
+
+        const isOwner =
+            String(evidence.uploadedBy) === String(req.user.userId);
+
+        const permissions =
+            req.app.locals.db.collection("accessPermissions");
+
+        const permission = await permissions.findOne({
+            evidenceId: new ObjectId(evidenceId),
+            userId: new ObjectId(req.user.userId),
+            permission: "VIEW"
+        });
+
+        if (!isOwner && !permission) {
+            return res.status(403).json({
+                message: "You do not have permission to download this evidence"
+            });
+        }
+
+        const encryptedPath = path.join(
+            __dirname,
+            "..",
+            "storage",
+            evidence.encryptedFile
+        );
+
+        if (!fs.existsSync(encryptedPath)) {
+            return res.status(404).json({
+                message: "Evidence file not found"
+            });
+        }
+
+        const encryptedData = fs.readFileSync(encryptedPath);
+        const iv = encryptedData.subarray(0, 16);
+        const encryptedContent = encryptedData.subarray(16);
+
+        const decipher = crypto.createDecipheriv(
+            "aes-256-cbc",
+            ENCRYPTION_KEY,
+            iv
+        );
+
+        const decryptedContent = Buffer.concat([
+            decipher.update(encryptedContent),
+            decipher.final()
+        ]);
+
+        const currentHash = crypto
+            .createHash("sha256")
+            .update(decryptedContent)
+            .digest("hex");
+
+        if (
+            currentHash.toLowerCase() !==
+            String(evidence.hash).toLowerCase()
+        ) {
+            return res.status(409).json({
+                message: "Evidence integrity check failed",
+                status: "TAMPERING_DETECTED"
+            });
+        }
+
+        tempPath = path.join(
+            __dirname,
+            "..",
+            "storage",
+            `${evidence._id}-${Date.now()}-download.tmp`
+        );
+
+        fs.writeFileSync(tempPath, decryptedContent);
+
+        await recordAndSaveEcho(
+            req,
+            evidenceId,
+            evidence.caseId.toString(),
+            "DOWNLOADED",
+            req.user.name,
+            currentHash
+        );
+
+        return res.download(
+            tempPath,
+            path.basename(evidence.fileName),
+            (error) => {
+                if (tempPath && fs.existsSync(tempPath)) {
+                    fs.unlinkSync(tempPath);
+                }
+
+                if (error) {
+                    console.error("Download response failed:", error);
+                }
+            }
+        );
+    } catch (error) {
+        if (tempPath && fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+        }
+
+        console.error("Evidence download failed:", error);
+
+        if (!res.headersSent) {
+            return res.status(500).json({
+                message: "Evidence download failed"
+            });
+        }
+    }
+}
 async function addForensicReport(req, res) {
     try {
         const { evidenceId } = req.params;
@@ -539,11 +783,11 @@ async function addForensicReport(req, res) {
 
         if (req.user.role !== "Forensic Expert") {
             return res.status(403).json({
-                message: "Only forensic experts can add forensic reports"
+                message: "Only forensic experts can add reports"
             });
         }
 
-        if (!ObjectId.isValid(evidenceId)) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
                 message: "Invalid evidence ID"
             });
@@ -583,9 +827,6 @@ async function addForensicReport(req, res) {
             });
         }
 
-        const reports =
-            req.app.locals.db.collection("forensicReports");
-
         const report = {
             evidenceId: new ObjectId(evidenceId),
             caseId: evidence.caseId,
@@ -597,9 +838,13 @@ async function addForensicReport(req, res) {
             createdAt: new Date()
         };
 
+        const reports =
+            req.app.locals.db.collection("forensicReports");
+
         const result = await reports.insertOne(report);
 
-        const blockchainRecord = await recordEcho(
+        const blockchainRecord = await recordAndSaveEcho(
+            req,
             evidenceId,
             evidence.caseId.toString(),
             "REPORT_ADDED",
@@ -607,24 +852,18 @@ async function addForensicReport(req, res) {
             evidence.hash
         );
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "Forensic report added successfully",
             report: {
                 reportId: result.insertedId,
-                evidenceId,
-                caseId: evidence.caseId,
-                reportTitle,
-                findings,
-                conclusion,
-                createdBy: req.user.name,
-                createdAt: report.createdAt
+                ...report
             },
             blockchain: blockchainRecord
         });
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to add forensic report"
         });
     }
@@ -634,46 +873,18 @@ async function getForensicReport(req, res) {
     try {
         const { evidenceId } = req.params;
 
-        if (!ObjectId.isValid(evidenceId)) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
                 message: "Invalid evidence ID"
             });
         }
 
-        const evidenceCollection =
-            req.app.locals.db.collection("evidence");
-
         const reports =
             req.app.locals.db.collection("forensicReports");
 
-        const evidence = await evidenceCollection.findOne({
-            _id: new ObjectId(evidenceId)
-        });
-
-        if (!evidence) {
-            return res.status(404).json({
-                message: "Evidence not found"
-            });
-        }
-
-        console.log("LOOKING FOR EVIDENCE ID:", evidenceId);
-
-const allReports = await reports.find({}).toArray();
-
-console.log("FORENSIC REPORTS IN DATABASE:");
-console.log(allReports);
-
         const report = await reports.findOne({
-            $or: [
-        {
             evidenceId: new ObjectId(evidenceId)
-        },
-        {
-            evidenceId: evidenceId
-        }
-                ]
         });
-         
 
         if (!report) {
             return res.status(404).json({
@@ -681,18 +892,15 @@ console.log(allReports);
             });
         }
 
-        res.json({
-            report
-        });
+        return res.json({ report });
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to retrieve forensic report"
         });
     }
 }
-
 async function submitEvidenceToCourt(req, res) {
     try {
         const { evidenceId } = req.params;
@@ -703,7 +911,7 @@ async function submitEvidenceToCourt(req, res) {
             });
         }
 
-        if (!ObjectId.isValid(evidenceId)) {
+        if (!ObjectId.isValid(evidenceId || "")) {
             return res.status(400).json({
                 message: "Invalid evidence ID"
             });
@@ -728,13 +936,7 @@ async function submitEvidenceToCourt(req, res) {
             _id: evidence.caseId
         });
 
-        if (!caseData) {
-            return res.status(404).json({
-                message: "Associated case not found"
-            });
-        }
-
-        if (caseData.createdBy !== req.user.userId) {
+        if (!caseData || caseData.createdBy !== req.user.userId) {
             return res.status(403).json({
                 message: "You do not have access to this case"
             });
@@ -753,7 +955,8 @@ async function submitEvidenceToCourt(req, res) {
             });
         }
 
-        const blockchainRecord = await recordEcho(
+        const blockchainRecord = await recordAndSaveEcho(
+            req,
             evidenceId,
             evidence.caseId.toString(),
             "SUBMITTED_TO_COURT",
@@ -761,7 +964,7 @@ async function submitEvidenceToCourt(req, res) {
             evidence.hash
         );
 
-        res.json({
+        return res.json({
             message: "Evidence submitted to court successfully",
             evidenceId,
             submittedBy: req.user.name,
@@ -771,119 +974,7 @@ async function submitEvidenceToCourt(req, res) {
     } catch (error) {
         console.error(error);
 
-        res.status(500).json({
-            message: "Failed to submit evidence to court"
-        });
-    }
-}
-
-async function getEvidence(req, res) {
-    try {
-        const evidenceCollection =
-            req.app.locals.db.collection("evidence");
-
-        const permissionsCollection =
-            req.app.locals.db.collection("accessPermissions");
-
-        let evidence;
-
-        if (req.user.role === "Lawyer") {
-            evidence = await evidenceCollection
-                .find({
-                    uploadedBy: req.user.userId
-                })
-                .sort({ uploadedAt: -1 })
-                .toArray();
-        } else {
-            const permissions =
-                await permissionsCollection
-                    .find({
-                        userId: new ObjectId(req.user.userId),
-                        permission: "VIEW"
-                    })
-                    .toArray();
-
-            const evidenceIds =
-                permissions.map(
-                    (permission) => permission.evidenceId
-                );
-
-            evidence = await evidenceCollection
-                .find({
-                    _id: {
-                        $in: evidenceIds
-                    }
-                })
-                .sort({ uploadedAt: -1 })
-                .toArray();
-        }
-
-        res.json({
-            message: "Evidence retrieved successfully",
-            evidence
-        });
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
-            message: "Failed to retrieve evidence"
-        });
-    }
-}
-
-async function submitEvidenceToCourt(req, res) {
-    try {
-        const { evidenceId } = req.params;
-
-        if (req.user.role !== "Lawyer") {
-            return res.status(403).json({
-                message: "Only lawyers can submit evidence to court"
-            });
-        }
-
-        if (!ObjectId.isValid(evidenceId)) {
-            return res.status(400).json({
-                message: "Invalid evidence ID"
-            });
-        }
-
-        const evidenceCollection =
-            req.app.locals.db.collection("evidence");
-
-        const evidence = await evidenceCollection.findOne({
-            _id: new ObjectId(evidenceId)
-        });
-
-        if (!evidence) {
-            return res.status(404).json({
-                message: "Evidence not found"
-            });
-        }
-
-        if (evidence.uploadedBy !== req.user.userId) {
-            return res.status(403).json({
-                message: "You do not have access to this evidence"
-            });
-        }
-
-        const blockchainRecord = await recordEcho(
-            evidenceId,
-            evidence.caseId.toString(),
-            "SUBMITTED_TO_COURT",
-            req.user.name,
-            evidence.hash
-        );
-
-        res.json({
-            message: "Evidence submitted to court successfully",
-            evidenceId,
-            submittedBy: req.user.name,
-            blockchain: blockchainRecord
-        });
-    } catch (error) {
-        console.error(error);
-
-        res.status(500).json({
+        return res.status(500).json({
             message: "Failed to submit evidence to court"
         });
     }
@@ -896,6 +987,7 @@ module.exports = {
     grantEvidenceAccess,
     accessEvidence,
     verifyEvidence,
+    downloadEvidence,
     addForensicReport,
     getForensicReport,
     submitEvidenceToCourt

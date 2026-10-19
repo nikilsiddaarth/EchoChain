@@ -4,8 +4,10 @@ function EchoChain() {
     const [evidence, setEvidence] = useState([]);
     const [selectedEvidence, setSelectedEvidence] =
         useState("");
-
     const [history, setHistory] = useState([]);
+    
+    const [historySource, setHistorySource] = useState("UNAVAILABLE");
+
     const [loading, setLoading] = useState(true);
     const [loadingHistory, setLoadingHistory] =
         useState(false);
@@ -41,8 +43,11 @@ function EchoChain() {
                         "Failed to load Echo history"
                 );
             }
-
-            setHistory(data.history || []);
+            console.log("ECHO HISTORY API RESPONSE:", data);
+            
+            setHistory(Array.isArray(data.history) ? data.history : []);
+            console.log("HISTORY STATE INPUT:", Array.isArray(data.history), data.history.length);
+            setHistorySource(data.source || "UNAVAILABLE");
         } catch (error) {
             setError(error.message);
             setHistory([]);
@@ -258,9 +263,15 @@ function EchoChain() {
                                         STATUS
                                     </span>
 
-                                    <strong className="verified-text">
-                                        VERIFIED
-                                    </strong>
+                                    
+                                <strong className="verified-text">
+                                    {historySource === "BLOCKCHAIN"
+                                        ? "BLOCKCHAIN"
+                                        : historySource === "MONGODB_BACKUP"
+                                        ? "MONGODB BACKUP"
+                                        : "UNAVAILABLE"}
+                                </strong>
+
                                 </div>
                             </div>
 
