@@ -4,3 +4,11 @@ node_modules/
 storage/
 dist/
 build/
+
+# Python Virtual Environments and Bytecode
+.venv/
+fl_service/.venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/

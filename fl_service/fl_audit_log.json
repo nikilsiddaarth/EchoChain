@@ -1,0 +1,72 @@
+[
+    {
+        "round": 1,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.6633,
+        "model_hash": "7e009ab3f573b2e45fd138e8790c736156616a6df163ebc24d9879f8e6832040"
+    },
+    {
+        "round": 2,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.6767,
+        "model_hash": "9c56d316e801f4cb4556cb46ef977de0a7f79001b55433f8207a29be8adda2ba"
+    },
+    {
+        "round": 3,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.7633,
+        "model_hash": "d28c928a332d6b0f3e196fa335d4b97d1cf96353d6b1114b3158fa5ec2e3c3be"
+    },
+    {
+        "round": 4,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.79,
+        "model_hash": "a5116530d317d6de74b790c2abe9aeb82c1a615d40404319a1e08157facc126d"
+    },
+    {
+        "round": 5,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.8033,
+        "model_hash": "fa3374a09164bc64e622cf89abd2ae210cbbef2ff551ad114856de730bf23aa7"
+    },
+    {
+        "round": 6,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.8333,
+        "model_hash": "c31d6a85757d5ad7305de606b7e11b4d41ea8deece2bbbe7bd13b0009424aaf6"
+    },
+    {
+        "round": 7,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.86,
+        "model_hash": "5828b4b8eb14215339e01f0c71d2bda8f05ca5bbcb71718eaefcb26cf5c4dd00"
+    },
+    {
+        "round": 8,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.8733,
+        "model_hash": "390d6935c44698c22c68451473a3c7466c44ee534d98bd9e787cb042a2d4ae4f"
+    },
+    {
+        "round": 9,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.8733,
+        "model_hash": "f83d6adc55dc885231537398e88aa6cbebd6164290e69ea4705b43f0177455da"
+    },
+    {
+        "round": 10,
+        "clients": 2,
+        "training_records": 600,
+        "test_accuracy": 0.8733,
+        "model_hash": "7644506bb44e4c67301f28821e9a135480ef39ac7cb1979799f00929831fd70b"
+    }
+]

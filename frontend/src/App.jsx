@@ -12,6 +12,7 @@ import {
 import CaseDetails from "./pages/CaseDetails";
 import EvidenceDetails from "./pages/EvidenceDetails";
 import ForensicReport from "./pages/ForensicReport";
+import FederatedLearning from "./pages/FederatedLearning";
 
 
 
@@ -215,6 +216,10 @@ function App() {
 
         if (currentPage === "verify") {
             return <VerifyEvidence />;
+        }
+
+        if (currentPage === "fl") {
+            return <FederatedLearning onNavigate={navigateTo} />;
         }
 
         return (
@@ -799,6 +804,16 @@ function App() {
                     >
                         <span>✓</span>
                         Verify Evidence
+                    </div>
+
+                    <div
+                        className={`nav-item ${
+                            currentPage === "fl" ? "active" : ""
+                        }`}
+                        onClick={() => navigateTo("fl")}
+                    >
+                        <span>⚡</span>
+                        Federated Learning
                     </div>
                 </nav>
 

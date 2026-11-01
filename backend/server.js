@@ -8,6 +8,7 @@ const { MongoClient } = require("mongodb");
 const authRoutes = require("./routes/authRoutes");
 const caseRoutes = require("./routes/caseRoutes");
 const evidenceRoutes = require("./routes/evidenceRoutes");
+const flRoutes = require("./routes/flRoutes");
 
 console.log("Encryption secret loaded:", !!process.env.ENCRYPTION_SECRET);
 
@@ -39,6 +40,7 @@ async function startServer() {
         app.use("/api/auth", authRoutes);
         app.use("/api/cases", caseRoutes);
         app.use("/api/evidence", evidenceRoutes);
+        app.use("/api/fl", flRoutes);
 
         const PORT = 5000;
 
